@@ -1,0 +1,31 @@
+Using pip3 command to install Ryu Controller is the easiest option. If pip3 already installed, skip
+the first command
+
+$ sudo apt install python-pip3
+$ sudo pip3 install ryu
+
+Test Ryu Controller with Simple Switch
+First, open a terminal and run Mininet with the following command. This starts a network
+emulation environment with 1 switch and 3 hosts.
+
+$ sudo mn --topo single,3 --mac --controller remote --switch ovsk
+
+Second, open another new terminal and run a simple switch controller. This controller will flood
+a packet to all ports if the switching table has no record of the destination mac address and add a
+record which specifies the source mac address at in port.
+
+$ ryu-manager ryu.app.simple_switch
+loading app ryu.app.simple_switch
+loading app ryu.controller.ofp_handler
+instantiating app ryu.app.simple_switch of SimpleSwitch
+instantiating app ryu.controller.ofp_handler of OFPHandler
+
+After opening the Ryu controller, test the reachability between these three hosts.
+mininet> pingall
+
+In the terminal of the Ryu controller, displays packet in messages.
+After opening the Ryu controller, test the OpenFlow messages using Wireshark
+
+mininet> h1 ping h2
+
+Open Wireshark and filter openflow messages

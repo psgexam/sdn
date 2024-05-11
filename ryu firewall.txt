@@ -1,0 +1,247 @@
+Starting the RYU Openflow controller
+Ensure that no other controller is present
+root@mininet-vm:~# killall controller
+
+Note that 'controller' is a simple OpenFlow reference controller implementation in linux.
+Ensure that this is not running before start user defined controller.
+Clear all mininet components
+root@mininet-vm:~# mn -c
+
+Start the Ryu Firewall application
+For convenience set an environment variable that points at the directory containing the Ryu
+packages.
+$ export RYU_APP=/usr/local/lib/python2.7/dist-packages/ryu/app/
+To execute a Ryu application you need to use the ryu-manager.
+$ ryu-manager --verbose $RYU_APP/ryu.app.rest_firewall
+Sample Output:
+loading app /usr/local/lib/python2.7/dist-packages/ryu/app//ryu.app.rest_firewall
+loading app ryu.controller.ofp_handler
+instantiating app None of DPSet
+creating context dpset
+creating context wsgi
+instantiating app /usr/local/lib/python2.7/dist-packages/ryu/app//ryu.app.rest_firewall of
+RestFirewallAPI
+instantiating app ryu.controller.ofp_handler of OFPHandler
+BRICK dpset
+PROVIDES EventDP TO {'RestFirewallAPI': set(['dpset'])}
+CONSUMES EventOFPStateChange
+CONSUMES EventOFPPortStatus
+CONSUMES EventOFPSwitchFeatures
+BRICK RestFirewallAPI
+CONSUMES EventDP
+CONSUMES EventOFPStatsReply
+CONSUMES EventOFPPacketIn
+
+CONSUMES EventOFPFlowStatsReply
+BRICK ofp_event
+PROVIDES EventOFPStatsReply TO {'RestFirewallAPI': set(['main'])}
+PROVIDES EventOFPFlowStatsReply TO {'RestFirewallAPI': set(['main'])}
+PROVIDES EventOFPPacketIn TO {'RestFirewallAPI': set(['main'])}
+PROVIDES EventOFPStateChange TO {'dpset': set(['main', 'dead'])}
+PROVIDES EventOFPPortStatus TO {'dpset': set(['main'])}
+PROVIDES EventOFPSwitchFeatures TO {'dpset': set(['config'])}
+CONSUMES EventOFPPortDescStatsReply
+CONSUMES EventOFPHello
+CONSUMES EventOFPErrorMsg
+CONSUMES EventOFPEchoRequest
+CONSUMES EventOFPEchoReply
+CONSUMES EventOFPSwitchFeatures
+(18761) wsgi starting up on http://0.0.0.0:8080
+The controller is now running but not doing anything because no switches are connected to it.
+Using the Firewall
+Start mininet with 3 hosts connected to 1 switch
+
+Build an environment on Mininet.
+$ sudo mn --topo single,3 --mac --switch ovsk --controller remote -x
+Sample Output:
+*** Creating network
+*** Adding controller
+Connected to the remote controller at 127.0.0.1:6633
+
+*** Adding hosts:
+h1 h2 h3
+*** Adding switches:
+s1
+*** Adding links:
+(h1, s1) (h2, s1) (h3, s1)
+*** Configuring hosts
+h1 h2 h3
+*** Running terms on localhost:10.0
+*** Starting controller
+*** Starting 1 switches
+s1
+*** Starting CLI:
+mininet>
+##Ensure that the bridge is using OpenFlow13
+mininet> sh ovs-vsctl set bridge s1 protocols=OpenFlow13
+##Monitor controller to ensure that the switch connects
+In the RYU controller window , see a message similar to the following to show that the switch
+has connected to the controller and has exchanged information about its capabilities.
+connected socket:<eventlet.greenio.base.GreenSocket object at 0x7f92b3e01150>
+address:('127.0.0.1', 38638)
+EVENT ofp_event->dpset EventOFPStateChange
+connected socket:<eventlet.greenio.base.GreenSocket object at 0x7f92b3e01b50>
+address:('127.0.0.1', 38640)
+hello ev <ryu.controller.ofp_event.EventOFPHello object at 0x7f92b3e01750>
+move onto config mode
+EVENT ofp_event->dpset EventOFPSwitchFeatures
+switch features ev
+version=0x4,msg_type=0x6,msg_len=0x20,xid=0x66e6e688,OFPSwitchFeatures(auxiliary_id=0
+,capabilities=79,datapath_id=1,n_buffers=256,n_tables=254)
+move onto main mode
+EVENT ofp_event->dpset EventOFPStateChange
+EVENT ofp_event->dpset EventOFPPortStatus
+DPSET: register datapath <ryu.controller.controller.Datapath object at 0x7f92b3e016d0>
+EVENT dpset->RestFirewallAPI EventDP
+DPSET: A port was modified.(datapath id = 0000000000000001, port number = 4294967294)
+[FW][INFO] dpid=0000000000000001: Join as firewall.
+Dump flows on switch s1
+A flow is the most fine-grained work unit of a switch. In Mininet, dpctl is a command that allows
+visibility and control over a single switch's flow table. It is especially useful for debugging, by
+viewing flow state and flow counters.
+
+mininet> dpctl dump-flows -O OpenFlow13
+*** s1 ------------------------------------------------------------------------
+OFPST_FLOW reply (OF1.3) (xid=0x2):
+cookie=0x0, duration=484.137s, table=0, n_packets=39, n_bytes=2430, priority=65535
+actions=drop
+cookie=0x0, duration=484.137s, table=0, n_packets=0, n_bytes=0, priority=0
+actions=CONTROLLER:128
+cookie=0x0, duration=484.137s, table=0, n_packets=0, n_bytes=0, priority=65534,arp
+actions=NORMAL
+
+Note that the output omits fields that are set to matched against ANY. Only specific matches are
+included.
+The fields 'n_packets' and 'n_bytes' indicates how many packets and the volume of packets that
+matched the rules for a given flow entry.
+There are three flows installed here are (in order shown above):
+? any packet, action is drop packet (priority=65535) ...
+? any packet, action is send the first 128 bytes of the packet as a PACKET_IN message to
+controller (priority 0)
+? any ARP packet, action is to process as you would in a NORMAL switch (priority
+65534)
+Rules are matched in terms of the most specific and priorities are used to break ties (the highest
+number wins).
+The switch behaviour specified by the flows is to process ARP packets normally and drop all
+other packets.
+This reflects that immediately after starting the firewall, it was set to disable status to cut off all
+communication.
+Enable it with the following command.
+$ curl -X PUT http://localhost:8080/firewall/module/enable/0000000000000001
+[
+{
+"switch_id": "0000000000000001",
+"command_result": {
+"result": "success",
+"details": "firewall running."
+}
+}
+]
+Check that is enabled.
+
+$ curl http://localhost:8080/firewall/module/status
+[
+{
+"status": "enable",
+"switch_id": "0000000000000001"
+}
+]
+Now dump the flow table to see what has changed:
+mininet> dpctl dump-flows -O OpenFlow13
+*** s1 ------------------------------------------------------------------------
+OFPST_FLOW reply (OF1.3) (xid=0x2):
+cookie=0x0, duration=3158.793s, table=0, n_packets=0, n_bytes=0, priority=65534,arp
+actions=NORMAL
+cookie=0x0, duration=3158.793s, table=0, n_packets=0, n_bytes=0, priority=0
+actions=CONTROLLER:128
+See that the DROP flow has been removed.
+Now the rules say that ARP is handled normally but anything else is sent to the controller.
+Trying to ping will result in the packet_n for the second rule increasing and see the controller log
+register that it is receiving packets.
+The Firewall controller will block packets unless explicitly allowed.
+Add a Rule
+Add a rule to permit pinging between h1 and h2.
+Let’s add the following rules. Rule ID is assigned automatically.
+| Source | Destination | Protocol | Permission | (Rule ID) | | 10.0.0.1/32 | 10.0.0.2/32 | ICMP |
+Allow | 1 | | 10.0.0.2/32 | 10.0.0.1/32 | ICMP | Allow | 2 |
+Use the RESTful interface:
+$ curl -X POST -d '{"nw_src": "10.0.0.1/32", "nw_dst": "10.0.0.2/32", "nw_proto": "ICMP"}'
+http://localhost:8080/firewall/rules/0000000000000001
+[
+{
+"switch_id": "0000000000000001",
+"command_result": [
+{
+"result": "success",
+"details": "Rule added. : rule_id=1"
+}
+]
+}
+
+]
+$ curl -X POST -d '{"nw_src": "10.0.0.2/32", "nw_dst": "10.0.0.1/32", "nw_proto": "ICMP"}'
+http://localhost:8080/firewall/rules/0000000000000001
+[
+{
+"switch_id": "0000000000000001",
+"command_result": [
+{
+"result": "success",
+"details": "Rule added. : rule_id=2"
+}
+]
+}
+]
+Added rules are registered in the switch as flow entries.
+mininet> dpctl dump-flows -O OpenFlow13
+*** s1 ------------------------------------------------------------------------
+OFPST_FLOW reply (OF1.3) (xid=0x2):
+cookie=0x0, duration=3636.260s, table=0, n_packets=4, n_bytes=168, priority=65534,arp
+actions=NORMAL
+cookie=0x1, duration=26.389s, table=0, n_packets=0, n_bytes=0,
+priority=1,icmp,nw_src=10.0.0.1,nw_dst=10.0.0.2 actions=NORMAL
+cookie=0x2, duration=8.975s, table=0, n_packets=0, n_bytes=0,
+priority=1,icmp,nw_src=10.0.0.2,nw_dst=10.0.0.1 actions=NORMAL
+cookie=0x0, duration=3636.260s, table=0, n_packets=15, n_bytes=1470, priority=0
+actions=CONTROLLER:128
+ICMP is now allowed and passed to the switch pipeline for normal processing (note here we
+aren't going 100% openflow because instead of requiring the controller to work out ports etc. as
+per the simple switch, here we rely on the presence of a traditional pipeline).
+Deleting rules
+Deleting a Rule
+Delete the “rule_id:1” and “rule_id:2” rules.
+Node: c0 (root):
+$ curl -X DELETE -d '{"rule_id": "1"}' http://localhost:8080/firewall/rules/0000000000000001
+[
+{
+"switch_id": "0000000000000001",
+"command_result": [
+{
+"result": "success",
+"details": "Rule deleted. : ruleID=1"
+
+}
+]
+}
+]
+$ curl -X DELETE -d '{"rule_id": "2"}' http://localhost:8080/firewall/rules/0000000000000001
+[
+{
+"switch_id": "0000000000000001",
+"command_result": [
+{
+"result": "success",
+"details": "Rule deleted. : ruleID=2"
+}
+]
+}
+]
+the flow table has now been returned to it state prior to allowing the traffic.
+mininet> dpctl dump-flows -O OpenFlow13
+*** s1 ------------------------------------------------------------------------
+OFPST_FLOW reply (OF1.3) (xid=0x2):
+cookie=0x0, duration=4205s, table=0, n_packets=6, n_bytes=252, priority=65534,arp
+actions=NORMAL
+cookie=0x0, duration=4205s, table=0, n_packets=17, n_bytes=1666, priority=0
+actions=CONTROLLER:128
+mininet>
